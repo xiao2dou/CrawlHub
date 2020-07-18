@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-Created on Thu Jul  2 18:32:55 2020
+Created on Sun Mar 29 17:32:40 2020
 
-@author: LiuDongjin
+@author: Zhenlin
 """
 
 from bs4 import BeautifulSoup
@@ -21,11 +21,11 @@ headers = {'User-Agent': user_agent}
 # values = {'name': 'Michael Foord',
 #          'location': 'Northampton',
 #          'language': 'Python' }
-# data = urllib.parse.urlencode(values)
-# data = data.encode('ascii')
+#data = urllib.parse.urlencode(values)
+#data = data.encode('ascii')
 
-keyword = '交'  # 用于判断乱码，一般来说，交大新闻中肯定包括了‘交’
-root = 'http://news.xjtu.edu.cn'
+keyword = '日'  # 用于判断乱码，一般来说，新闻中肯定包括了日期
+
 
 def get_one_page_news(page_url):
     '''获取某一新闻列表页上的全部新闻摘要[date_time, url, title]
@@ -34,92 +34,74 @@ def get_one_page_news(page_url):
     Returns:
         返回当前页面上所有新闻列表List[List[]]，列表中每一个元素为一条新闻的[date_time, url, title]
     '''
-    # page_url = 'http://news.xjtu.edu.cn/xyzs/21.htm'
-    
+    #    page_url='http://www.chinanews.com/scroll-news/2020/0702/news.shtml'
+    root = 'http://www.chinanews.com'
     req = urllib.request.Request(page_url, headers=headers)
 
     try:
         response = urllib.request.urlopen(req, timeout=10)
         html = response.read()
-        # print(html)
     except socket.timeout as err:
         print('socket.timeout')
         print(err)
-        return [],''
+        return []
     except Exception as e:
         print("-----%s:%s %s-----" % (type(e), e, page_url))
-        return [],''
+        return []
 
+    # http://www.crummy.com/software/BeautifulSoup/bs4/doc.zh/
     soup = BeautifulSoup(html, "html.parser")
 
     news_pool = []
-    # news_list = soup.find('div', class_='i_left')
-    items = soup.find_all('div', class_='l_li')
-    # print(items)
+    news_list = soup.find('div', class_="content_list")
+    items = news_list.find_all('li')
     for i, item in enumerate(items):
-        if len(item) == 0:
+        #        print('%d/%d'%(i,len(items)))
+        if len(item) == 0:  # 存在空行
             continue
 
-        a = item.find('a')
-        cite = item.find('cite')
-        title = a.get('title')
+        a = item.find('div', class_="dd_bt").find('a')
+        title = a.string
         url = a.get('href')
-        # if root in url:
-        #     url = url[len(root):]
-        if '..' in url:
-            url = url.replace('..', root) # ../info/1004/4750.htm
-        else:
-            url = root + '/' +url # info/1033/137388.htm
-        
-        date_time = cite.get_text()
-        date_time = date_time[1:-1]  # 删掉日期前的[]
+        if root in url:
+            url = url[len(root):]  # 切片，去掉root '/sh/2020/07-02/9227317.shtml'
 
-        news_info = [date_time, url, title]
+        category = ''
+        try:
+            category = item.find('div', class_="dd_lm").find('a').string
+        except Exception as e:
+            continue
+
+        if category == '图片':  # 图片新闻不爬取
+            continue
+
+        year = url.split('/')[-3]
+        date_time = item.find('div', class_="dd_time").string  # 7-2 11:48
+        date_time = '%s-%s:00' % (year, date_time)
+
+        news_info = [date_time, "http://www.chinanews.com"+url, title]
         news_pool.append(news_info)
-
-    # next_url = soup.find('a', class_='Next').get('href') # zyxw/518.htm
-    # next_url = root +'/' +next_url
-
-    next = soup.find('a', class_='Next')
-    if next is None:
-        print('Next page is None')
-        return news_pool, ''
-    next_url = next.get('href') # 99.htm
-    # next_url = root +'/' +next_url
-    # print('Next:'+next_url)
-
-    return news_pool, next_url
+    return news_pool
 
 
-def get_news_pool(news_category):
+def get_news_pool(start_date, end_date):
     '''获取新闻列表池
     Args:
-        news_category:为一个固定列表，指定需要爬取的新闻分类
+        start_date:开始日期
+        end_date:结束日期
     Returns:
         返回一个新闻列表List[List[]]，列表中每一个元素为一条新闻的[date_time, url, title]
     '''
     news_pool = []
-    for category in news_category:
-        url = root + '/' + category + '.htm'
-        while 'htm' in url:
-            one_page_news_pool, url = get_one_page_news(url)
-            news_pool += one_page_news_pool
-            # url = root + '/' + category + '/' +url
-            if category in url:
-                url = root + '/' +url
-            else:
-                url = root + '/' + category + '/' +url
-            print('Extracting news urls at '+ url)
-        # page_index = category
-        # # begin = category[1]
-        # end = category[2]
-        # while page_index < end:
-        #     # http://news.xjtu.edu.cn/xyzs/21.htm
-        #     page_url = 'http://news.xjtu.edu.cn/' + \
-        #         category[0]+'/'+str(page_index)+'.htm'
-        #     print('Extracting news urls at '+category[0]+str(page_index))
-        #     news_pool += get_one_page_news(page_url)
-        #     page_index += 1
+    delta = timedelta(days=1)
+    while start_date <= end_date:
+        date_str = start_date.strftime("%Y/%m%d")  # 2020-07-02 --> 2020/0702
+        page_url = 'http://www.chinanews.com/scroll-news/%s/news.shtml' % (  # 滚动新闻栏目
+            date_str)
+        print('Extracting news urls at %s' % date_str)
+        news_pool += get_one_page_news(page_url)
+#        print('done')
+        start_date += delta
     return news_pool
 
 
@@ -137,6 +119,7 @@ def crawl_news(news_pool, min_body_len, doc_dir_path, doc_encoding):
     news_pool_len = len(news_pool)
     for n, news in enumerate(news_pool):
         print('%d/%d' % (n, news_pool_len))
+
         req = urllib.request.Request(news[1], headers=headers)
         try:
             response = urllib.request.urlopen(req, timeout=10)
@@ -154,11 +137,12 @@ def crawl_news(news_pool, min_body_len, doc_dir_path, doc_encoding):
             time.sleep(600)
             continue
 
+        # http://www.crummy.com/software/BeautifulSoup/bs4/doc.zh/
         soup = BeautifulSoup(html, "html.parser")
         [s.extract() for s in soup('script')]  # 去除script
 
         try:
-            ps = soup.find('div', class_="d_detail").find_all('p')
+            ps = soup.find('div', class_="left_zw").find_all('p')
         except Exception as e:
             print("--2---%s: %s-----" % (type(e), news[1]))
             print("Sleeping for 10 minute")
@@ -167,25 +151,24 @@ def crawl_news(news_pool, min_body_len, doc_dir_path, doc_encoding):
 
         body = ''
         for p in ps:
-            cur = p.get_text().strip()
+            cur = p.get_text().strip()  # 去除首尾空格
             if cur == '':
                 continue
             body += '\t' + cur + '\n'
         body = body.replace(" ", "")
 
-        if keyword not in body:
+        if keyword not in body:  # 过滤掉乱码新闻
             continue
 
         if len(body) <= min_body_len:
             continue
 
         doc = ET.Element("doc")
-        # news_id = 'xjtunews ' + "%d" %(i)
         ET.SubElement(doc, "id").text = "%d" % (i)
         ET.SubElement(doc, "url").text = news[1]
         ET.SubElement(doc, "title").text = news[2]
-        ET.SubElement(doc, 'datetime').text = news[0]
-        ET.SubElement(doc, 'body').text = body
+        ET.SubElement(doc, "datetime").text = news[0]
+        ET.SubElement(doc, "body").text = body
         tree = ET.ElementTree(doc)
         tree.write(doc_dir_path + "%d.xml" %
                    (i), encoding=doc_encoding, xml_declaration=True)
@@ -199,17 +182,13 @@ if __name__ == '__main__':
     config = configparser.ConfigParser()
     config.read('../config.ini', 'utf-8')
 
-    # news_category = [['zyxw', 1, 518],
-    #                 ['jyjx', 1, 65],
-    #                 ['xyzs', 1, 21],
-    #                 ['kydt', 1, 80]]
-
-    news_category = ['zyxw','jyjx','xyzs', 'kydt']
-
-    news_pool = get_news_pool(news_category)
+    delta = timedelta(days=-5)
+    end_date = date.today()
+    start_date = end_date + delta  # 5天前
+    news_pool = get_news_pool(start_date, end_date)
     news_pool = list(set(news_pool))
-    print('Starting to crawl %d xjtunews' % len(news_pool))
+    print('Starting to crawl %d chinanews' % len(news_pool))
     # doc_dir_path = config['DEFAULT']['doc_dir_path']+'chinanews/'
-    crawl_news(news_pool, 20, config['DEFAULT']
+    crawl_news(news_pool, 140, config['DEFAULT']
                ['doc_dir_path'], config['DEFAULT']['doc_encoding'])
     print('done!')
